@@ -57,21 +57,25 @@ speedtest_html = f"""
                 <div style="color: #888; font-size: 12px;">PING</div>
                 <div id="ping" style="color: #00bfff; font-size: 28px; font-weight: bold;">--</div>
                 <div style="color: #666; font-size: 11px;">ms</div>
+                <div id="avgPing" style="color: #00bfff; font-size: 11px; margin-top: 5px; opacity: 0.8;">Avg: --</div>
             </div>
             <div style="background: rgba(255,127,80,0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #ff7f50;">
                 <div style="color: #888; font-size: 12px;">JITTER</div>
                 <div id="jitter" style="color: #ff7f50; font-size: 28px; font-weight: bold;">--</div>
                 <div style="color: #666; font-size: 11px;">ms</div>
+                <div id="avgJitter" style="color: #ff7f50; font-size: 11px; margin-top: 5px; opacity: 0.8;">Avg: --</div>
             </div>
             <div style="background: rgba(0,255,204,0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #00ffcc;">
                 <div style="color: #888; font-size: 12px;">DOWNLOAD</div>
                 <div id="download" style="color: #00ffcc; font-size: 28px; font-weight: bold;">--</div>
                 <div style="color: #666; font-size: 11px;">Mbps</div>
+                <div id="avgDownload" style="color: #00ffcc; font-size: 11px; margin-top: 5px; opacity: 0.8;">Avg: --</div>
             </div>
             <div style="background: rgba(255,105,180,0.1); padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #ff69b4;">
                 <div style="color: #888; font-size: 12px;">UPLOAD</div>
                 <div id="upload" style="color: #ff69b4; font-size: 28px; font-weight: bold;">--</div>
                 <div style="color: #666; font-size: 11px;">Mbps</div>
+                <div id="avgUpload" style="color: #ff69b4; font-size: 11px; margin-top: 5px; opacity: 0.8;">Avg: --</div>
             </div>
         </div>
     </div>
@@ -90,7 +94,7 @@ speedtest_html = f"""
     <!-- History Section -->
     <div id="historySection" style="margin-top: 20px;">
         <div style="color: #888; font-size: 14px; margin-bottom: 10px;">📊 Test History (<span id="testCount">0</span> tests)</div>
-        <div id="historyList" style="max-height: 250px; overflow-y: auto; background: rgba(0,0,0,0.2); border-radius: 10px; padding: 10px;"></div>
+        <div id="historyList" style="background: rgba(0,0,0,0.2); border-radius: 10px; padding: 10px;"></div>
         <button id="clearBtn" onclick="clearHistory()" style="margin-top: 10px; background: rgba(255,255,255,0.1); color: #888; border: 1px solid rgba(255,255,255,0.2); padding: 8px 20px; border-radius: 8px; cursor: pointer; display: none;">🗑 Clear History</button>
     </div>
 </div>
@@ -192,31 +196,45 @@ function updateChart() {{
     chart.update('none');
 }}
 
+// Helper function for fetch with timeout
+async function fetchWithTimeout(url, options = {{}}, timeoutMs = 30000) {{
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {{
+        const response = await fetch(url, {{ ...options, signal: controller.signal }});
+        clearTimeout(timeoutId);
+        return response;
+    }} catch (error) {{
+        clearTimeout(timeoutId);
+        throw error;
+    }}
+}}
+
 async function runSingleTest() {{
     const status = document.getElementById('status');
-    
+
     try {{
         status.textContent = '🏓 Measuring latency...';
         const pings = [];
         for (let i = 0; i < 5; i++) {{
             const t0 = performance.now();
-            await fetch('https://speed.cloudflare.com/__down?bytes=0', {{ cache: 'no-store' }});
+            await fetchWithTimeout('https://speed.cloudflare.com/__down?bytes=0', {{ cache: 'no-store' }}, 10000);
             pings.push(performance.now() - t0);
         }}
         const ping = Math.min(...pings);
         const jitter = pings.slice(1).reduce((sum, v, i) => sum + Math.abs(v - pings[i]), 0) / (pings.length - 1);
-        
+
         status.textContent = '⬇️ Testing download...';
         const dlStart = performance.now();
-        const dlResp = await fetch('https://speed.cloudflare.com/__down?bytes=25000000', {{ cache: 'no-store' }});
+        const dlResp = await fetchWithTimeout('https://speed.cloudflare.com/__down?bytes=25000000', {{ cache: 'no-store' }}, 60000);
         const dlBlob = await dlResp.blob();
         const dlTime = (performance.now() - dlStart) / 1000;
         const dlMbps = (dlBlob.size * 8 / 1_000_000) / dlTime;
-        
+
         status.textContent = '⬆️ Testing upload...';
         const ulData = new Uint8Array(5000000);
         const ulStart = performance.now();
-        await fetch('https://speed.cloudflare.com/__up', {{ method: 'POST', body: ulData }});
+        await fetchWithTimeout('https://speed.cloudflare.com/__up', {{ method: 'POST', body: ulData }}, 60000);
         const ulTime = (performance.now() - ulStart) / 1000;
         const ulMbps = (ulData.length * 8 / 1_000_000) / ulTime;
         
@@ -230,6 +248,7 @@ async function runSingleTest() {{
         testHistory.push({{ time: now, ping: ping.toFixed(1), jitter: jitter.toFixed(1), dl: dlMbps.toFixed(1), ul: ulMbps.toFixed(1) }});
         
         updateHistoryDisplay();
+        updateAverages();
         
         // Show graph only after 2+ tests
         if (testHistory.length >= 2) {{
@@ -240,9 +259,40 @@ async function runSingleTest() {{
         
         return true;
     }} catch(e) {{
-        status.textContent = '❌ Error: ' + e.message;
+        if (e.name === 'AbortError') {{
+            status.textContent = '❌ Request timed out. Check your connection.';
+        }} else {{
+            status.textContent = '❌ Error: ' + e.message;
+        }}
         return false;
     }}
+}}
+
+function updateAverages() {{
+    if (testHistory.length === 0) return;
+    
+    // Helper to extract number from test object, handling legacy keys
+    const getVal = (t, keys) => {{
+        for (const k of keys) {{
+            if (t[k] !== undefined) return parseFloat(t[k]);
+        }}
+        return 0;
+    }};
+    
+    const validTests = testHistory.filter(t => !isNaN(parseFloat(t.ping))); // Filter out completely broken records
+    if (validTests.length === 0) return;
+
+    const avg = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length;
+    
+    const avgPing = avg(validTests.map(t => getVal(t, ['ping']))).toFixed(1);
+    const avgJitter = avg(validTests.map(t => getVal(t, ['jitter']))).toFixed(1);
+    const avgDl = avg(validTests.map(t => getVal(t, ['dl', 'download']))).toFixed(1);
+    const avgUl = avg(validTests.map(t => getVal(t, ['ul', 'upload']))).toFixed(1);
+    
+    document.getElementById('avgPing').textContent = `Avg: ${{avgPing}}`;
+    document.getElementById('avgJitter').textContent = `Avg: ${{avgJitter}}`;
+    document.getElementById('avgDownload').textContent = `Avg: ${{avgDl}}`;
+    document.getElementById('avgUpload').textContent = `Avg: ${{avgUl}}`;
 }}
 
 function updateHistoryDisplay() {{
@@ -268,6 +318,7 @@ function clearHistory() {{
     testHistory = [];
     localStorage.removeItem('speedtest_history');
     updateHistoryDisplay();
+    document.getElementById('results').style.display = 'none';
     document.getElementById('chartSection').style.display = 'none';
     if (chart) {{
         chart.destroy();
@@ -335,6 +386,7 @@ window.onload = function() {{
             testHistory = JSON.parse(saved);
             if (testHistory.length > 0) {{
                 updateHistoryDisplay();
+                updateAverages();
                 const last = testHistory[testHistory.length - 1];
                 document.getElementById('ping').textContent = last.ping;
                 document.getElementById('jitter').textContent = last.jitter;
@@ -354,7 +406,12 @@ window.onload = function() {{
 
 setInterval(() => {{
     if (testHistory.length > 0) {{
-        localStorage.setItem('speedtest_history', JSON.stringify(testHistory.slice(-100)));
+        try {{
+            localStorage.setItem('speedtest_history', JSON.stringify(testHistory.slice(-100)));
+        }} catch(e) {{
+            // localStorage unavailable (private browsing) or quota exceeded
+            console.warn('Could not save to localStorage:', e.message);
+        }}
     }}
 }}, 3000);
 </script>

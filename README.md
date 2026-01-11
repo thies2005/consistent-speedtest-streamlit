@@ -7,9 +7,11 @@ A premium network speed test application built with Streamlit and Chart.js. It m
 ## Features
 - **Client-Side Testing**: Measures the speed of the user's phone or laptop, not the server.
 - **Interactive Performance Graph**: Live toggleable metrics (Ping, Jitter, Download, Upload).
+- **Average Metrics**: Displays running session averages for more consistent monitoring.
+- **Extended History**: Full history list that extends automatically as you run more tests.
 - **High-Frequency Monitoring**: Adjustable frequency down to 2 seconds.
-- **Continuous Monitoring**: Automatic tests for 10 seconds to 60 minutes.
-- **Premium UI**: Sleek dark mode design.
+- **Continuous Monitoring**: Automatic tests for 10 seconds to 5 minutes.
+- **Premium UI**: Sleek dark mode design with live progress tracking.
 
 ## Local Installation
 1. Clone the repository:
@@ -34,7 +36,6 @@ A premium network speed test application built with Streamlit and Chart.js. It m
 5. Click **Deploy**!
 
 ## Technologies Used
-- [Streamlit](https://streamlit.io/)
-- [speedtest-cli](https://pypi.org/project/speedtest-cli/)
-- [Plotly](https://plotly.com/python/)
-- [Pandas](https://pandas.pydata.org/)
+- [Streamlit](https://streamlit.io/) - Python web framework
+- [Chart.js](https://www.chartjs.org/) - JavaScript charting library
+- [Cloudflare Speed Test API](https://speed.cloudflare.com/) - Network testing backend

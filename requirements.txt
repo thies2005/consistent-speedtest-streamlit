@@ -1,6 +1,1 @@
 streamlit
-plotly
-pandas
-numpy
-streamlit-javascript
-streamlit-js-eval
