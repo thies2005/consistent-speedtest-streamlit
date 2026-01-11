@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-import time
 from datetime import datetime
 
 # Set page config
@@ -15,32 +14,22 @@ st.set_page_config(
 st.markdown("""
 <style>
 .main { background-color: #0e1117; }
-.stMetric { 
-    background: rgba(255, 255, 255, 0.05); 
-    padding: 15px; 
-    border-radius: 10px; 
-}
+.stMetric { background: rgba(255, 255, 255, 0.05); padding: 15px; border-radius: 10px; }
 </style>
 """, unsafe_allow_html=True)
 
 # Session State
 if 'history' not in st.session_state:
     st.session_state.history = pd.DataFrame(columns=['Timestamp', 'Ping (ms)', 'Jitter (ms)', 'Download (Mbps)', 'Upload (Mbps)'])
-if 'test_triggered' not in st.session_state:
-    st.session_state.test_triggered = False
-if 'run_start' not in st.session_state:
-    st.session_state.run_start = None
-if 'continuous_mode' not in st.session_state:
-    st.session_state.continuous_mode = False
 
 # Sidebar
 st.sidebar.title("⚙️ Settings")
 test_mode = st.sidebar.radio("Mode", ["Single Test", "Continuous"])
-duration_min = 5
-freq_sec = 30
+duration_min = 1
+freq_sec = 10
 if test_mode == "Continuous":
-    duration_min = st.sidebar.slider("Duration (min)", 1, 60, 5)
-    freq_sec = st.sidebar.slider("Frequency (sec)", 10, 120, 30)
+    duration_min = st.sidebar.slider("Duration (min)", 1, 60, 1)
+    freq_sec = st.sidebar.slider("Frequency (sec)", 10, 120, 10)
 
 def create_chart(df, column, color):
     fig = go.Figure()
@@ -68,14 +57,25 @@ def create_chart(df, column, color):
 st.title("🚀 Device Speed Monitor")
 st.caption("Measures your **browser/device** connection using Cloudflare.")
 
-# Speedtest HTML Component
-speedtest_html = """
+# Generate the HTML with dynamic continuous settings
+is_continuous = "true" if test_mode == "Continuous" else "false"
+
+speedtest_html = f"""
 <div id="speedtest-container" style="padding: 20px; background: linear-gradient(135deg, #1a1a2e, #16213e); border-radius: 15px; margin-bottom: 20px;">
     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 20px;">
-        <button id="startBtn" onclick="runSpeedTest()" style="background: linear-gradient(135deg, #00ffcc, #00bfff); color: #000; border: none; padding: 15px 40px; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer; transition: transform 0.2s;">
-            ▶ Run Speed Test
+        <button id="startBtn" onclick="startTest()" style="background: linear-gradient(135deg, #00ffcc, #00bfff); color: #000; border: none; padding: 15px 40px; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer;">
+            ▶ Start Test
+        </button>
+        <button id="stopBtn" onclick="stopTest()" style="background: #ff4444; color: #fff; border: none; padding: 15px 40px; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer; display: none;">
+            ⏹ Stop
         </button>
         <div id="status" style="color: #888; font-size: 14px;"></div>
+    </div>
+    <div id="progressContainer" style="display: none; margin-top: 15px;">
+        <div style="background: rgba(255,255,255,0.1); border-radius: 10px; height: 8px; overflow: hidden;">
+            <div id="progressBar" style="background: linear-gradient(90deg, #00ffcc, #00bfff); height: 100%; width: 0%; transition: width 0.5s;"></div>
+        </div>
+        <div id="progressText" style="color: #888; font-size: 12px; margin-top: 5px;"></div>
     </div>
     <div id="results" style="display: none; margin-top: 30px;">
         <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px;">
@@ -101,131 +101,185 @@ speedtest_html = """
             </div>
         </div>
     </div>
+    <div id="historySection" style="margin-top: 20px;">
+        <div style="color: #888; font-size: 14px; margin-bottom: 10px;">📊 Test History (<span id="testCount">0</span> tests)</div>
+        <div id="historyList" style="max-height: 200px; overflow-y: auto; background: rgba(0,0,0,0.2); border-radius: 10px; padding: 10px;"></div>
+    </div>
 </div>
 
 <script>
-async function runSpeedTest() {
-    const btn = document.getElementById('startBtn');
+const CONTINUOUS = {is_continuous};
+const DURATION_MS = {duration_min * 60 * 1000};
+const FREQUENCY_MS = {freq_sec * 1000};
+
+let isRunning = false;
+let testInterval = null;
+let startTime = null;
+let testHistory = [];
+
+async function runSingleTest() {{
     const status = document.getElementById('status');
-    const results = document.getElementById('results');
     
-    btn.disabled = true;
-    btn.textContent = '⏳ Testing...';
-    status.textContent = 'Connecting to test server...';
-    
-    try {
+    try {{
         // Ping test
-        status.textContent = 'Measuring latency...';
+        status.textContent = '🏓 Measuring latency...';
         const pings = [];
-        for (let i = 0; i < 5; i++) {
+        for (let i = 0; i < 5; i++) {{
             const t0 = performance.now();
-            await fetch('https://speed.cloudflare.com/__down?bytes=0', { cache: 'no-store' });
+            await fetch('https://speed.cloudflare.com/__down?bytes=0', {{ cache: 'no-store' }});
             pings.push(performance.now() - t0);
-        }
+        }}
         const ping = Math.min(...pings);
         const jitter = pings.slice(1).reduce((sum, v, i) => sum + Math.abs(v - pings[i]), 0) / (pings.length - 1);
         
         // Download test
-        status.textContent = 'Testing download speed...';
+        status.textContent = '⬇️ Testing download...';
         const dlStart = performance.now();
-        const dlResp = await fetch('https://speed.cloudflare.com/__down?bytes=25000000', { cache: 'no-store' });
+        const dlResp = await fetch('https://speed.cloudflare.com/__down?bytes=25000000', {{ cache: 'no-store' }});
         const dlBlob = await dlResp.blob();
         const dlTime = (performance.now() - dlStart) / 1000;
         const dlMbps = (dlBlob.size * 8 / 1_000_000) / dlTime;
         
         // Upload test
-        status.textContent = 'Testing upload speed...';
+        status.textContent = '⬆️ Testing upload...';
         const ulData = new Uint8Array(5000000);
         const ulStart = performance.now();
-        await fetch('https://speed.cloudflare.com/__up', { method: 'POST', body: ulData });
+        await fetch('https://speed.cloudflare.com/__up', {{ method: 'POST', body: ulData }});
         const ulTime = (performance.now() - ulStart) / 1000;
         const ulMbps = (ulData.length * 8 / 1_000_000) / ulTime;
         
-        // Display results
+        // Update display
         document.getElementById('ping').textContent = ping.toFixed(1);
         document.getElementById('jitter').textContent = jitter.toFixed(1);
         document.getElementById('download').textContent = dlMbps.toFixed(1);
         document.getElementById('upload').textContent = ulMbps.toFixed(1);
-        
-        results.style.display = 'block';
-        status.textContent = '✅ Test complete! Results shown below.';
-        
-        // Send to Streamlit via query param (workaround)
-        const data = { ping: ping.toFixed(2), jitter: jitter.toFixed(2), download: dlMbps.toFixed(2), upload: ulMbps.toFixed(2) };
-        
-        // Store in localStorage for persistence
-        const history = JSON.parse(localStorage.getItem('speedtest_history') || '[]');
-        history.push({ ...data, timestamp: new Date().toLocaleTimeString() });
-        localStorage.setItem('speedtest_history', JSON.stringify(history));
-        localStorage.setItem('speedtest_latest', JSON.stringify(data));
-        
-    } catch(e) {
-        status.textContent = '❌ Error: ' + e.message;
-    }
-    
-    btn.disabled = false;
-    btn.textContent = '▶ Run Speed Test';
-}
-
-// Load previous results if any
-window.onload = function() {
-    const latest = JSON.parse(localStorage.getItem('speedtest_latest'));
-    if (latest) {
-        document.getElementById('ping').textContent = parseFloat(latest.ping).toFixed(1);
-        document.getElementById('jitter').textContent = parseFloat(latest.jitter).toFixed(1);
-        document.getElementById('download').textContent = parseFloat(latest.download).toFixed(1);
-        document.getElementById('upload').textContent = parseFloat(latest.upload).toFixed(1);
         document.getElementById('results').style.display = 'block';
-        document.getElementById('status').textContent = '📊 Showing last test results.';
-    }
-};
+        
+        // Add to history
+        const now = new Date().toLocaleTimeString();
+        testHistory.push({{ time: now, ping: ping.toFixed(1), jitter: jitter.toFixed(1), dl: dlMbps.toFixed(1), ul: ulMbps.toFixed(1) }});
+        updateHistoryDisplay();
+        
+        return true;
+    }} catch(e) {{
+        status.textContent = '❌ Error: ' + e.message;
+        return false;
+    }}
+}}
+
+function updateHistoryDisplay() {{
+    const list = document.getElementById('historyList');
+    const count = document.getElementById('testCount');
+    count.textContent = testHistory.length;
+    
+    list.innerHTML = testHistory.slice().reverse().map((t, i) => `
+        <div style="display: flex; justify-content: space-between; padding: 8px; background: rgba(255,255,255,0.05); border-radius: 5px; margin-bottom: 5px; font-size: 12px;">
+            <span style="color: #888;">${{t.time}}</span>
+            <span style="color: #00bfff;">📶 ${{t.ping}}ms</span>
+            <span style="color: #00ffcc;">⬇️ ${{t.dl}} Mbps</span>
+            <span style="color: #ff69b4;">⬆️ ${{t.ul}} Mbps</span>
+        </div>
+    `).join('');
+}}
+
+function updateProgress() {{
+    if (!startTime) return;
+    const elapsed = Date.now() - startTime;
+    const progress = Math.min(100, (elapsed / DURATION_MS) * 100);
+    document.getElementById('progressBar').style.width = progress + '%';
+    
+    const remaining = Math.max(0, Math.ceil((DURATION_MS - elapsed) / 1000));
+    const mins = Math.floor(remaining / 60);
+    const secs = remaining % 60;
+    document.getElementById('progressText').textContent = `Time remaining: ${{mins}}m ${{secs}}s`;
+}}
+
+async function startTest() {{
+    if (isRunning) return;
+    isRunning = true;
+    startTime = Date.now();
+    
+    document.getElementById('startBtn').style.display = 'none';
+    document.getElementById('stopBtn').style.display = 'inline-block';
+    document.getElementById('progressContainer').style.display = CONTINUOUS ? 'block' : 'none';
+    
+    // Run first test immediately
+    await runSingleTest();
+    document.getElementById('status').textContent = '✅ Test complete!';
+    
+    if (CONTINUOUS) {{
+        document.getElementById('status').textContent = `🔄 Continuous mode: Next test in ${{FREQUENCY_MS/1000}}s...`;
+        
+        // Set up interval for continuous tests
+        testInterval = setInterval(async () => {{
+            if (!isRunning) return;
+            
+            // Check if duration exceeded
+            if (Date.now() - startTime >= DURATION_MS) {{
+                stopTest();
+                document.getElementById('status').textContent = '✅ Continuous monitoring completed!';
+                return;
+            }}
+            
+            document.getElementById('status').textContent = '🔄 Running next test...';
+            await runSingleTest();
+            document.getElementById('status').textContent = `✅ Test complete! Next in ${{FREQUENCY_MS/1000}}s...`;
+        }}, FREQUENCY_MS);
+        
+        // Update progress bar every second
+        setInterval(updateProgress, 1000);
+    }} else {{
+        stopTest();
+    }}
+}}
+
+function stopTest() {{
+    isRunning = false;
+    if (testInterval) {{
+        clearInterval(testInterval);
+        testInterval = null;
+    }}
+    document.getElementById('startBtn').style.display = 'inline-block';
+    document.getElementById('stopBtn').style.display = 'none';
+    document.getElementById('progressContainer').style.display = 'none';
+    if (!CONTINUOUS) {{
+        document.getElementById('status').textContent = '✅ Test complete!';
+    }}
+}}
+
+// Load any previous history from localStorage
+window.onload = function() {{
+    const saved = localStorage.getItem('speedtest_history');
+    if (saved) {{
+        try {{
+            testHistory = JSON.parse(saved);
+            updateHistoryDisplay();
+            if (testHistory.length > 0) {{
+                const last = testHistory[testHistory.length - 1];
+                document.getElementById('ping').textContent = last.ping;
+                document.getElementById('jitter').textContent = last.jitter;
+                document.getElementById('download').textContent = last.dl;
+                document.getElementById('upload').textContent = last.ul;
+                document.getElementById('results').style.display = 'block';
+                document.getElementById('status').textContent = '📊 Showing last test results.';
+            }}
+        }} catch(e) {{}}
+    }}
+}};
+
+// Save history when tests run
+setInterval(() => {{
+    if (testHistory.length > 0) {{
+        localStorage.setItem('speedtest_history', JSON.stringify(testHistory.slice(-50)));
+    }}
+}}, 5000);
 </script>
 """
 
 # Render the speedtest component
-st.components.v1.html(speedtest_html, height=350)
-
-# Manual data entry for charting (since JS can't directly update Python state)
-st.divider()
-st.subheader("📊 Historical Data")
-
-with st.expander("➕ Add Test Result Manually (or view history)"):
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        manual_ping = st.number_input("Ping (ms)", min_value=0.0, value=0.0)
-    with col2:
-        manual_jitter = st.number_input("Jitter (ms)", min_value=0.0, value=0.0)
-    with col3:
-        manual_dl = st.number_input("Download (Mbps)", min_value=0.0, value=0.0)
-    with col4:
-        manual_ul = st.number_input("Upload (Mbps)", min_value=0.0, value=0.0)
-    
-    if st.button("Add to History"):
-        new_row = {
-            'Timestamp': datetime.now().strftime("%H:%M:%S"),
-            'Ping (ms)': manual_ping,
-            'Jitter (ms)': manual_jitter,
-            'Download (Mbps)': manual_dl,
-            'Upload (Mbps)': manual_ul
-        }
-        st.session_state.history = pd.concat([st.session_state.history, pd.DataFrame([new_row])], ignore_index=True)
-        st.success("Added!")
-        st.rerun()
-
-# Display charts if we have data
-if not st.session_state.history.empty:
-    c1, c2 = st.columns(2)
-    c3, c4 = st.columns(2)
-    with c1: st.plotly_chart(create_chart(st.session_state.history, 'Ping (ms)', '#00BFFF'), use_container_width=True)
-    with c2: st.plotly_chart(create_chart(st.session_state.history, 'Jitter (ms)', '#FF7F50'), use_container_width=True)
-    with c3: st.plotly_chart(create_chart(st.session_state.history, 'Download (Mbps)', '#00FFCC'), use_container_width=True)
-    with c4: st.plotly_chart(create_chart(st.session_state.history, 'Upload (Mbps)', '#FF69B4'), use_container_width=True)
-
-    with st.expander("📋 Raw Data"):
-        st.dataframe(st.session_state.history.sort_index(ascending=False), use_container_width=True)
-        if st.button("🗑 Clear History"):
-            st.session_state.history = pd.DataFrame(columns=['Timestamp', 'Ping (ms)', 'Jitter (ms)', 'Download (Mbps)', 'Upload (Mbps)'])
-            st.rerun()
+st.components.v1.html(speedtest_html, height=550)
 
 st.sidebar.divider()
-st.sidebar.caption("Speed tests run directly in your browser using Cloudflare endpoints. Results are displayed live above.")
+if test_mode == "Continuous":
+    st.sidebar.success(f"Will run tests every {freq_sec}s for {duration_min} min")
+st.sidebar.caption("Tests run in your browser using Cloudflare endpoints.")
