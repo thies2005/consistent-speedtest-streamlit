@@ -1,20 +1,21 @@
-# 🚀 Consistent Speedtest - Streamlit App
+# 🚀 Speedtest - Streamlit App
 
-A premium network speed test application built with Streamlit and Plotly. It measures Ping, Jitter, Download, and Upload speeds while maintaining a session history for consistency tracking.
+A premium network speed test application built with Streamlit and Chart.js. It measures Ping, Jitter, Download, and Upload speeds of your current device with high-frequency monitoring and live visualization.
 
-![Sample Screenshot](https://raw.githubusercontent.com/streamlit/docs/main/public/images/streamlit-logo-secondary-colormark-darktext.png) *Note: You can add your own screenshot here.*
+![Sample Screenshot](https://raw.githubusercontent.com/streamlit/docs/main/public/images/streamlit-logo-secondary-colormark-darktext.png)
 
 ## Features
 - **Client-Side Testing**: Measures the speed of the user's phone or laptop, not the server.
-- **Continuous Monitoring**: Range from 1 minute to 1 hour with adjustable frequency.
-- **Real-time Monitoring**: 4 Interactive charts (Ping, Jitter, Download, Upload).
-- **Premium UI**: Responsive dark mode design.
+- **Interactive Performance Graph**: Live toggleable metrics (Ping, Jitter, Download, Upload).
+- **High-Frequency Monitoring**: Adjustable frequency down to 2 seconds.
+- **Continuous Monitoring**: Automatic tests for 10 seconds to 60 minutes.
+- **Premium UI**: Sleek dark mode design.
 
 ## Local Installation
 1. Clone the repository:
    ```bash
-   git clone <your-repo-url>
-   cd cobalt-astro
+   git clone https://github.com/thies2005/Speedtest
+   cd Speedtest
    ```
 2. Install dependencies:
    ```bash
